@@ -13,6 +13,8 @@ use rustc_resolve as resolve;
 use rustc_metadata::creader::CrateLoader;
 use rustc_metadata::cstore::CStore;
 use rustc_trans_utils;
+use rustc_driver::driver::CompileController;
+
 use std::default::Default;
 
 use rustc::session::search_paths::SearchPaths;
@@ -58,11 +60,12 @@ use syntax_pos::{DUMMY_SP, MultiSpan, FileName};
 use std::io;
 use std::io::Read;
 
+use ast_extract;
+
 pub fn run_compiler<'a>(args: &[String],
                         callbacks: &mut CompilerCalls<'a>,
                         file_loader: Option<Box<FileLoader + Send + Sync + 'static>>,
                         emitter: Box<Emitter>)
-                        -> (CompileResult, Option<Session>)
 {
     syntax::with_globals(|| {
         run_compiler_impl(args, callbacks, file_loader, emitter)
@@ -73,18 +76,17 @@ fn run_compiler_impl<'a>(args: &[String],
                          callbacks: &mut CompilerCalls<'a>,
                          file_loader: Option<Box<FileLoader + Send + Sync + 'static>>,
                          emitter: Box<Emitter>)
-                         -> (CompileResult, Option<Session>)
 {
     macro_rules! do_or_return {($expr: expr, $sess: expr) => {
         match $expr {
-            Compilation::Stop => return (Ok(()), $sess),
+            Compilation::Stop => return,
             Compilation::Continue => {}
         }
     }}
 
     let matches = match handle_options(args) {
         Some(matches) => matches,
-        None => return (Ok(()), None),
+        None => return
     };
 
     let (sopts, cfg) = config::build_session_options_and_crate_config(&matches);
@@ -106,7 +108,7 @@ fn run_compiler_impl<'a>(args: &[String],
         },
         None => match callbacks.no_input(&matches, &sopts, &cfg, &odir, &ofile, &descriptions) {
             Some((input, input_file_path)) => (input, input_file_path, None),
-            None => return (Ok(()), None),
+            None => return,
         },
     };
 
@@ -122,7 +124,7 @@ fn run_compiler_impl<'a>(args: &[String],
         // Immediately stop compilation if there was an issue reading
         // the input (for example if the input stream is not UTF-8).
         sess.err(&format!("{}", err));
-        return (Err(CompileIncomplete::Stopped), Some(sess));
+        return;
     }
 
     let trans = get_trans(&sess);
@@ -147,7 +149,7 @@ fn run_compiler_impl<'a>(args: &[String],
 
     let control = callbacks.build_controller(&sess, &matches);
 
-    (driver::compile_input(trans,
+    extract_fns(trans,
                            &sess,
                            &cstore,
                            &input_file_path,
@@ -155,9 +157,88 @@ fn run_compiler_impl<'a>(args: &[String],
                            &odir,
                            &ofile,
                            Some(plugins),
-                           &control),
-     Some(sess))
+                           &control);
 }
+
+fn extract_fns(trans: Box<TransCrate>,
+                     sess: &Session,
+                     cstore: &CStore,
+                     input_path: &Option<PathBuf>,
+                     input: &Input,
+                     outdir: &Option<PathBuf>,
+                     output: &Option<PathBuf>,
+                     addl_plugins: Option<Vec<String>>,
+                     control: &CompileController) {
+
+    let code_map = sess.codemap();
+
+    let krate = driver::phase_1_parse_input(control, &sess, &input).unwrap();
+
+    let name = rustc_trans_utils::link::find_crate_name(Some(&sess), &krate.attrs, &input);
+
+    let mut crate_loader = CrateLoader::new(&sess, &cstore, &name);
+
+    let resolver_arenas = resolve::Resolver::arenas();
+    let result = driver::phase_2_configure_and_expand_inner(&sess,
+                                                      &cstore,
+                                                      krate,
+                                                      None,
+                                                      &name,
+                                                      None,
+                                                      resolve::MakeGlobMap::No,
+                                                      &resolver_arenas,
+                                                      &mut crate_loader,
+                                                      |_| Ok(()));
+    let driver::InnerExpansionResult {
+        expanded_crate,
+        mut hir_forest,
+        resolver,
+        ..
+    } = abort_on_err(result, &sess);
+
+    // We need to hold on to the complete resolver, so we clone everything
+    // for the analysis passes to use. Suboptimal, but necessary in the
+    // current architecture.
+    let defs = resolver.definitions.clone();
+    let resolutions = ty::Resolutions {
+        freevars: resolver.freevars.clone(),
+        export_map: resolver.export_map.clone(),
+        trait_map: resolver.trait_map.clone(),
+        maybe_unused_trait_imports: resolver.maybe_unused_trait_imports.clone(),
+        maybe_unused_extern_crates: resolver.maybe_unused_extern_crates.clone(),
+    };
+    let analysis = ty::CrateAnalysis {
+        access_levels: Lrc::new(AccessLevels::default()),
+        name: name.to_string(),
+        glob_map: if resolver.make_glob_map { Some(resolver.glob_map.clone()) } else { None },
+    };
+
+    let arenas = AllArenas::new();
+    let hir_map = hir_map::map_crate(&sess, &*cstore, &mut hir_forest, &defs);
+    let output_filenames = driver::build_output_filenames(&input,
+                                                          &None,
+                                                          &None,
+                                                          &[],
+                                                          &sess);
+
+    let resolver = RefCell::new(resolver);
+
+    driver::phase_3_run_analysis_passes(&*trans,
+                                                     control,
+                                                     &sess,
+                                                     &*cstore,
+                                                     hir_map,
+                                                     analysis,
+                                                     resolutions,
+                                                     &arenas,
+                                                     &name,
+                                                     &output_filenames,
+                                                     |tcx, analysis, _, result| {
+        let fns = ast_extract::get_function_info(code_map, &expanded_crate);
+        eprintln!("Got functions: {:?}", fns);
+	});
+}
+ 
 
 fn make_output(matches: &getopts::Matches) -> (Option<PathBuf>, Option<PathBuf>) {
     let odir = matches.opt_str("out-dir").map(|o| PathBuf::from(&o));

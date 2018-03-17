@@ -16,6 +16,7 @@ extern crate getopts;
 
 mod run_compile;
 mod get_errors;
+mod ast_extract;
 
 fn main() {
     eprintln!("Starting");
