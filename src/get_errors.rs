@@ -45,7 +45,7 @@ use std::ops::Deref;
 use std::collections::{BTreeMap, BTreeSet};
 use std::process::Command;
 
-use run_compile;
+use run_compile::{self, ExtractionResult};
 
 struct CargoStubCallbacks {
     default: RustcDefaultCalls,
@@ -146,7 +146,9 @@ pub fn get_all_errors() {
     args.push(sysroot);
 
 
-    run_compile::run_compiler(&args, &mut callbacks, None, Box::new(collector.dup()));
+    if let Some(ExtractionResult { fns } ) = run_compile::run_compiler(&args, &mut callbacks, None, Box::new(collector.dup())) {
+        eprintln!("Final result: {:?}", fns);
+    }
 
 /*    let handler = Handler::with_emitter_and_flags(Box::new(collector.dup()), HandlerFlags {
         can_emit_warnings: false,

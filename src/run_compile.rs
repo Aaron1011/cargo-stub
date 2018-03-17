@@ -60,12 +60,16 @@ use syntax_pos::{DUMMY_SP, MultiSpan, FileName};
 use std::io;
 use std::io::Read;
 
-use ast_extract;
+use ast_extract::{self, FnInfo, FnMap};
+
+pub struct ExtractionResult {
+    pub fns: FnMap
+}
 
 pub fn run_compiler<'a>(args: &[String],
                         callbacks: &mut CompilerCalls<'a>,
                         file_loader: Option<Box<FileLoader + Send + Sync + 'static>>,
-                        emitter: Box<Emitter>)
+                        emitter: Box<Emitter>) -> Option<ExtractionResult>
 {
     syntax::with_globals(|| {
         run_compiler_impl(args, callbacks, file_loader, emitter)
@@ -75,18 +79,19 @@ pub fn run_compiler<'a>(args: &[String],
 fn run_compiler_impl<'a>(args: &[String],
                          callbacks: &mut CompilerCalls<'a>,
                          file_loader: Option<Box<FileLoader + Send + Sync + 'static>>,
-                         emitter: Box<Emitter>)
+                         emitter: Box<Emitter>) -> Option<ExtractionResult>
 {
-    macro_rules! do_or_return {($expr: expr, $sess: expr) => {
+    macro_rules! do_or_return {($expr: expr) => {
         match $expr {
-            Compilation::Stop => return,
+            Compilation::Stop => return None,
             Compilation::Continue => {}
         }
     }}
 
+
     let matches = match handle_options(args) {
         Some(matches) => matches,
-        None => return
+        None => return None
     };
 
     let (sopts, cfg) = config::build_session_options_and_crate_config(&matches);
@@ -97,8 +102,7 @@ fn run_compiler_impl<'a>(args: &[String],
                                            &sopts,
                                            &cfg,
                                            &descriptions,
-                                           sopts.error_format),
-                                           None);
+                                           sopts.error_format));
 
     let (odir, ofile) = make_output(&matches);
     let (input, input_file_path, input_err) = match make_input(&matches.free) {
@@ -108,7 +112,7 @@ fn run_compiler_impl<'a>(args: &[String],
         },
         None => match callbacks.no_input(&matches, &sopts, &cfg, &odir, &ofile, &descriptions) {
             Some((input, input_file_path)) => (input, input_file_path, None),
-            None => return,
+            None => unreachable!()
         },
     };
 
@@ -124,7 +128,7 @@ fn run_compiler_impl<'a>(args: &[String],
         // Immediately stop compilation if there was an issue reading
         // the input (for example if the input stream is not UTF-8).
         sess.err(&format!("{}", err));
-        return;
+        panic!("{}", err);
     }
 
     let trans = get_trans(&sess);
@@ -145,11 +149,11 @@ fn run_compiler_impl<'a>(args: &[String],
                                           &cstore,
                                           &input,
                                           &odir,
-                                          &ofile), Some(sess));
+                                          &ofile));
 
     let control = callbacks.build_controller(&sess, &matches);
 
-    extract_fns(trans,
+    Some(extract_fns(trans,
                            &sess,
                            &cstore,
                            &input_file_path,
@@ -157,7 +161,7 @@ fn run_compiler_impl<'a>(args: &[String],
                            &odir,
                            &ofile,
                            Some(plugins),
-                           &control);
+                           &control))
 }
 
 fn extract_fns(trans: Box<TransCrate>,
@@ -168,7 +172,7 @@ fn extract_fns(trans: Box<TransCrate>,
                      outdir: &Option<PathBuf>,
                      output: &Option<PathBuf>,
                      addl_plugins: Option<Vec<String>>,
-                     control: &CompileController) {
+                     control: &CompileController) -> ExtractionResult {
 
     let code_map = sess.codemap();
 
@@ -234,9 +238,15 @@ fn extract_fns(trans: Box<TransCrate>,
                                                      &name,
                                                      &output_filenames,
                                                      |tcx, analysis, _, result| {
-        let fns = ast_extract::get_function_info(code_map, &expanded_crate);
-        eprintln!("Got functions: {:?}", fns);
 	});
+
+    let mut fn_map = ast_extract::get_function_info(code_map, &expanded_crate);
+    for fns in fn_map.values_mut() {
+        fns.sort_unstable();
+    }
+
+    ExtractionResult { fns: fn_map }
+
 }
  
 

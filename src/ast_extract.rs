@@ -1,18 +1,23 @@
 use syntax::visit::{Visitor, FnKind, walk_crate};
 use syntax::ast::{self, FnDecl, NodeId, Crate};
-use syntax_pos::Span;
+use syntax_pos::{Span, FileName};
 use syntax::codemap::CodeMap;
 
+use std::collections::HashMap;
 use std::cmp::Ordering;
+use std::path::PathBuf;
+
+pub type FnMap = HashMap<PathBuf, Vec<FnInfo>>;
 
 struct FunctionExtractor<'a> {
-	fns: Vec<FnInfo>,
+	fns: FnMap,
 	code_map: &'a CodeMap
 }
 
 #[derive(Debug)]
 pub struct FnInfo {
 	name: Option<String>,
+    file: PathBuf,
 	lo_line: usize,
 	hi_line: usize
 }
@@ -50,12 +55,17 @@ impl<'a, 'ast> Visitor<'ast> for FunctionExtractor<'a> {
 			_ => None
 		};
 
-		self.fns.push(FnInfo { name, lo_line: lo.line, hi_line: hi.line });
+		let file = match self.code_map.span_to_filename(sp) {
+			FileName::Real(f) => f,
+			_ => panic!("Unexpected path for {:?}", sp)
+		};
+
+		self.fns.entry(file.clone()).or_insert_with(|| Vec::new()).push(FnInfo { name, file, lo_line: lo.line, hi_line: hi.line });
 	}
 }
 
-pub fn get_function_info(code_map: &CodeMap, krate: &Crate) -> Vec<FnInfo> {
-	let mut extractor = FunctionExtractor { fns: Vec::new(), code_map };
+pub fn get_function_info(code_map: &CodeMap, krate: &Crate) -> FnMap {
+	let mut extractor = FunctionExtractor { fns: HashMap::new(), code_map };
 	walk_crate(&mut extractor, krate);
 
 	extractor.fns
