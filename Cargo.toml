@@ -1,0 +1,6 @@
+[package]
+name = "cargo-stub"
+version = "0.0.0"
+authors = ["Aaron Hill <aa1ronham@gmail.com>"]
+
+[dependencies]
