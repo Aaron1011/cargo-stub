@@ -63,7 +63,8 @@ use std::io::Read;
 use ast_extract::{self, FnInfo, FnMap};
 
 pub struct ExtractionResult {
-    pub fns: FnMap
+    pub fns: FnMap,
+    pub session: Session
 }
 
 pub fn run_compiler<'a>(args: &[String],
@@ -153,7 +154,7 @@ fn run_compiler_impl<'a>(args: &[String],
 
     let control = callbacks.build_controller(&sess, &matches);
 
-    Some(extract_fns(trans,
+    let fns = extract_fns(trans,
                            &sess,
                            &cstore,
                            &input_file_path,
@@ -161,7 +162,9 @@ fn run_compiler_impl<'a>(args: &[String],
                            &odir,
                            &ofile,
                            Some(plugins),
-                           &control))
+                           &control);
+
+    Some(ExtractionResult { fns, session: sess })
 }
 
 fn extract_fns(trans: Box<TransCrate>,
@@ -172,17 +175,19 @@ fn extract_fns(trans: Box<TransCrate>,
                      outdir: &Option<PathBuf>,
                      output: &Option<PathBuf>,
                      addl_plugins: Option<Vec<String>>,
-                     control: &CompileController) -> ExtractionResult {
+                     control: &CompileController) -> FnMap {
 
-    let code_map = sess.codemap();
 
     let krate = driver::phase_1_parse_input(control, &sess, &input).unwrap();
 
     let name = rustc_trans_utils::link::find_crate_name(Some(&sess), &krate.attrs, &input);
 
-    let mut crate_loader = CrateLoader::new(&sess, &cstore, &name);
 
+    let mut crate_loader = CrateLoader::new(&sess, &cstore, &name);
     let resolver_arenas = resolve::Resolver::arenas();
+
+
+
     let result = driver::phase_2_configure_and_expand_inner(&sess,
                                                       &cstore,
                                                       krate,
@@ -193,6 +198,7 @@ fn extract_fns(trans: Box<TransCrate>,
                                                       &resolver_arenas,
                                                       &mut crate_loader,
                                                       |_| Ok(()));
+
     let driver::InnerExpansionResult {
         expanded_crate,
         mut hir_forest,
@@ -240,12 +246,12 @@ fn extract_fns(trans: Box<TransCrate>,
                                                      |tcx, analysis, _, result| {
 	});
 
-    let mut fn_map = ast_extract::get_function_info(code_map, &expanded_crate);
+    let mut fn_map = ast_extract::get_function_info(sess.codemap(), &expanded_crate);
     for fns in fn_map.values_mut() {
         fns.sort_unstable();
     }
 
-    ExtractionResult { fns: fn_map }
+    fn_map
 
 }
  

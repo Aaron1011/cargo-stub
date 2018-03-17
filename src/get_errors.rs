@@ -30,8 +30,11 @@ use rustc_driver::CompilerCalls;
 use syntax;
 use syntax::ast::NodeId;
 use syntax::ast;
-use syntax::codemap;
+use syntax::codemap::{self, CodeMap};
 use syntax::feature_gate::UnstableFeatures;
+
+use syntax_pos::{Span, MultiSpan, FileName};
+use ast_extract::{FnInfo, FnMap};
 
 use getopts;
 
@@ -126,8 +129,28 @@ impl Emitter for ErrorCollector {
     }
 }
 
+fn get_containing_fn(d: &Diagnostic, fns: &FnMap, code_map: &CodeMap) -> Option<FnInfo> {
+    let file = match code_map.span_to_filename(d.span.primary_span().unwrap()) { // TODO
+        FileName::Real(f) => f,
+        _ => panic!("Really weird: {:?}", d.span)
+    };
 
-pub fn get_all_errors() {
+
+    let line = code_map.lookup_char_pos(d.span.primary_span().unwrap().lo()).line;
+
+    if let Some(fns) = fns.get(&file) {
+        let pos = fns.binary_search_by_key(&line, |f| f.lo_line).err().unwrap();
+
+        // 'Pos' will always be one greater than the position of the next-larger
+        // starting line. 
+        let container = &fns[pos - 1];
+        return Some(container.clone())
+    }
+    None
+}
+
+
+pub fn get_erroring_functions() -> Vec<FnInfo> {
 
     let mut args: Vec<_> = std::env::args().skip(1).collect();
     
@@ -145,10 +168,18 @@ pub fn get_all_errors() {
     args.push("--sysroot".to_owned());
     args.push(sysroot);
 
+    let mut final_fns = Vec::new();
 
-    if let Some(ExtractionResult { fns } ) = run_compile::run_compiler(&args, &mut callbacks, None, Box::new(collector.dup())) {
+    if let Some(ExtractionResult { fns, session } ) = run_compile::run_compiler(&args, &mut callbacks, None, Box::new(collector.dup())) {
         eprintln!("Final result: {:?}", fns);
+
+        for err in collector.errors.borrow().iter() {
+            let container = get_containing_fn(err, &fns, session.codemap()).unwrap();
+            println!("Error {:?} is contained by function {:?}", err, container);
+            final_fns.push(container);
+        }
     }
+    return final_fns;
 
 /*    let handler = Handler::with_emitter_and_flags(Box::new(collector.dup()), HandlerFlags {
         can_emit_warnings: false,

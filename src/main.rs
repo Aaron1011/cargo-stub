@@ -20,5 +20,5 @@ mod ast_extract;
 
 fn main() {
     eprintln!("Starting");
-    get_errors::get_all_errors();
+    let fns = get_errors::get_erroring_functions();
 }

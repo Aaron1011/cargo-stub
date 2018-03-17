@@ -10,16 +10,16 @@ use std::path::PathBuf;
 pub type FnMap = HashMap<PathBuf, Vec<FnInfo>>;
 
 struct FunctionExtractor<'a> {
-	fns: FnMap,
-	code_map: &'a CodeMap
+	pub fns: FnMap,
+	pub code_map: &'a CodeMap
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FnInfo {
-	name: Option<String>,
-    file: PathBuf,
-	lo_line: usize,
-	hi_line: usize
+	pub name: Option<String>,
+    pub file: PathBuf,
+	pub lo_line: usize,
+	pub hi_line: usize
 }
 
 impl PartialEq for FnInfo {
