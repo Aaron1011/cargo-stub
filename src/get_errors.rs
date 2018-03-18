@@ -150,7 +150,8 @@ fn get_containing_fn(d: &Diagnostic, fns: &FnMap, code_map: &CodeMap) -> Option<
 }
 
 
-pub fn get_erroring_functions() -> Vec<FnInfo> {
+pub fn get_erroring_functions() -> FnMap {
+    eprintln!("Starting!");
 
     let mut args: Vec<_> = std::env::args().skip(1).collect();
     
@@ -168,7 +169,7 @@ pub fn get_erroring_functions() -> Vec<FnInfo> {
     args.push("--sysroot".to_owned());
     args.push(sysroot);
 
-    let mut final_fns = Vec::new();
+    let mut final_fns = FnMap::new();
 
     if let Some(ExtractionResult { fns, session } ) = run_compile::run_compiler(&args, &mut callbacks, None, Box::new(collector.dup())) {
         eprintln!("Final result: {:?}", fns);
@@ -176,7 +177,8 @@ pub fn get_erroring_functions() -> Vec<FnInfo> {
         for err in collector.errors.borrow().iter() {
             let container = get_containing_fn(err, &fns, session.codemap()).unwrap();
             println!("Error {:?} is contained by function {:?}", err, container);
-            final_fns.push(container);
+
+            final_fns.entry(container.file.clone()).or_insert_with(|| vec![]).push(container);
         }
     }
     return final_fns;

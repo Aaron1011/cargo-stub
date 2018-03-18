@@ -1,4 +1,4 @@
-mod other_mod;
+//mod other_mod;
 
 fn library_function(name: &str) {
     println!("Called with: {}", name);
@@ -10,6 +10,7 @@ fn consumer_one() {
 
 fn consumer_two() {
     library_function();
+
 }
 
 fn main() {

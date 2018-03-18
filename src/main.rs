@@ -17,8 +17,11 @@ extern crate getopts;
 mod run_compile;
 mod get_errors;
 mod ast_extract;
+mod stub_fn;
+
 
 fn main() {
     eprintln!("Starting");
     let fns = get_errors::get_erroring_functions();
+    stub_fn::compile_stubbed(fns);
 }
