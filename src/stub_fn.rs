@@ -10,9 +10,8 @@ use std::collections::HashSet;
 
 use ast_extract::FnMap;
 
-pub fn compile_stubbed(fns: FnMap) {
+pub fn compile_stubbed(fns: FnMap, args: Vec<String>) {
     let loader = StubbingLoader::new(fns);
-    let args: Vec<_> = std::env::args().skip(1).collect();
 
     rustc_driver::run(move || rustc_driver::run_compiler(&args, &mut RustcDefaultCalls, Some(Box::new(loader)), None));
 }
@@ -56,11 +55,22 @@ impl FileLoader for StubbingLoader {
 
                 eprintln!("Stubbing: {:?}", f);
                 {
-                    let start = &mut lines[f.lo_line + 1 -1];
+                    // Line numbers from the code map start at 1, so we need
+                    // to subtract 1 from lo_line to get the actual line.
+                    //
+                    // However, the
+                    // start of the function span is on the declaration line (e.g. "fn foo()"),
+                    // so we need to add 1 from lo_line to get the proper line.
+                    //
+                    // These two correctiosn cancel out, so we just use lo_lien as-is
+                    let start = &mut lines[f.lo_line];
                     start.insert_str(0, &format!("panic!(\"Function {} is stubbed!\")/*", name));
                 }
 
                 {
+                    // Like with lo_line, we need to adjust for the line numbers starting at 1,
+                    // and for the span ending on the closing bracket line. However, these
+                    // corrections don't cancel out - both are subtractions - so we subtract 2
                     let end = &mut lines[f.hi_line - 2];
                     end.push_str("*/");
                 }

@@ -150,25 +150,15 @@ fn get_containing_fn(d: &Diagnostic, fns: &FnMap, code_map: &CodeMap) -> Option<
 }
 
 
-pub fn get_erroring_functions() -> FnMap {
-    eprintln!("Starting!");
+pub fn get_erroring_functions(args: &[String]) -> Option<FnMap> {
+    //eprintln!("Starting!");
 
-    let mut args: Vec<_> = std::env::args().skip(1).collect();
     
     let mut callbacks = CargoStubCallbacks::new();
     let collector = ErrorCollector::new();
 
-    let sysroot = Command::new("rustc")
-                .arg("--print")
-                .arg("sysroot")
-                .output()
-                .ok()
-                .and_then(|out| String::from_utf8(out.stdout).ok())
-                .map(|s| s.trim().to_owned()).unwrap();
 
-    args.push("--sysroot".to_owned());
-    args.push(sysroot);
-
+   
     let mut final_fns = FnMap::new();
 
     if let Some(ExtractionResult { fns, session } ) = run_compile::run_compiler(&args, &mut callbacks, None, Box::new(collector.dup())) {
@@ -180,8 +170,10 @@ pub fn get_erroring_functions() -> FnMap {
 
             final_fns.entry(container.file.clone()).or_insert_with(|| vec![]).push(container);
         }
+
+        return Some(final_fns);
     }
-    return final_fns;
+    return None;
 
 /*    let handler = Handler::with_emitter_and_flags(Box::new(collector.dup()), HandlerFlags {
         can_emit_warnings: false,
